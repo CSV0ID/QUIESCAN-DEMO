@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quiescan Local</title>
+<style>
+:root{--bg:#0d0d0d;--card:#17161c;--line:#2a2833;--fg:#ecebf5;--mute:#a29fb4;--acc:#7F77DD;--bad:#ef6f69;--warn:#e0a13a;--ok:#62c493}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif;padding:32px 16px}
+main{max-width:760px;margin:0 auto}h1{margin:0 0 4px;letter-spacing:.12em}h1 span{color:var(--acc)}
+.sub{color:var(--mute);margin:0 0 24px}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:40px 16px;text-align:center;cursor:pointer;background:var(--card)}
+#drop.over{border-color:var(--acc)}#drop b{color:var(--acc)}
+button{margin-top:16px;padding:12px 22px;border:0;border-radius:6px;background:var(--acc);color:#0d0d0d;font:700 16px system-ui;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+#out{margin-top:28px}.verdict{font-size:1.5rem;font-weight:700;padding:16px;border-radius:8px;border:1px solid}
+.bad{color:var(--bad);border-color:var(--bad)}.warn{color:var(--warn);border-color:var(--warn)}.ok{color:var(--ok);border-color:var(--ok)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:12px}
+.k{color:var(--mute);font-size:12px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px}
+code{font-family:ui-monospace,monospace;font-size:13px;word-break:break-all}
+#st{margin-top:24px;color:var(--mute);font-size:13px}.err{color:var(--bad)}
+</style></head><body><main>
+<h1>QUIE<span>SCAN</span></h1>
+<p class="sub">Upload a file. It is only read, never run.</p>
+<div id="drop"><b>Click to choose a file</b> or drop it here<div id="name" class="sub"></div></div>
+<input id="f" type="file" hidden>
+<button id="go" disabled>Scan file</button>
+<div id="out"></div>
+<div id="st"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);let file=null;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function pick(x){file=x;$('name').textContent=x?x.name+' ('+(x.size/1024).toFixed(1)+' KB)':'';$('go').disabled=!x}
+$('drop').onclick=()=>$('f').click();$('f').onchange=e=>pick(e.target.files[0]);
+$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over')};
+$('drop').ondragleave=()=>$('drop').classList.remove('over');
+$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');pick(e.dataTransfer.files[0])};
+$('go').onclick=async()=>{
+  $('go').disabled=true;$('go').textContent='Scanning...';$('out').innerHTML='';
+  try{
+    const fd=new FormData();fd.append('file',file);
+    const r=await fetch('/analyze',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||r.status);show(d);
+  }catch(e){$('out').innerHTML='<div class="card err">'+esc(e.message)+'</div>'}
+  $('go').disabled=false;$('go').textContent='Scan file';
+};
+function show(d){
+  const v=d.verdict,cls=/CLEAN/.test(v)?'ok':/SUSPICIOUS/.test(v)?'warn':'bad';
+  const hits=(d.yara_hits||[]).map(h=>h.error?'error: '+h.error:h.rule);
+  const urls=d.urls_ips||[];
+  $('out').innerHTML=
+   '<div class="verdict '+cls+'">'+esc(v)+'</div>'+
+   '<div class="card"><div class="k">Summary (risk: '+esc(d.risk_score)+')</div>'+esc(d.summary)+'</div>'+
+   '<div class="card"><div class="k">File</div>'+esc(d.filename)+' &middot; '+esc(d.file_type)+' &middot; entropy '+d.entropy+(d.packed_likely?' (looks packed)':'')+
+     '<br><code>SHA-256 '+esc(d.sha256)+'</code><br><code>MD5 '+esc(d.md5)+'</code></div>'+
+   '<div class="card"><div class="k">YARA rules matched ('+hits.length+')</div>'+(hits.length?hits.map(esc).join(', '):'none')+'</div>'+
+   '<div class="card"><div class="k">URLs and IPs found ('+urls.length+')</div>'+(urls.length?'<code>'+urls.slice(0,15).map(esc).join('<br>')+'</code>':'none')+'</div>';
+}
+fetch('/status').then(r=>r.json()).then(s=>{
+  $('st').innerHTML='Hash list: '+s.hashes.toLocaleString()+' &middot; YARA rules: '+(s.yara?'loaded':'<span class="err">not loaded</span>')+' &middot; Gemini: '+(s.gemini?'key set':'<span class="err">no key (basic verdict only)</span>');
+});
+</script></body></html>
